@@ -1,0 +1,36 @@
+# Visual Studio files
+.vs/
+*.user
+*.userosscache
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.VC.opendb
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Bb]in/
+[Oo]bj/
+
+# Visual C++ cache files
+ipch/
+*.aps
+*.ncb
+*.opendb
+*.cachefile
+*.VC.db
+*.VC.VC.opendb
+
+# Other files
+*.exe
+*.dll
+*.lib
+*.pdb
+*.ilk
+*.log
+*.tlog
+*.obj
+*.idb 
