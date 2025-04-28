@@ -37,12 +37,20 @@ Este projeto implementa um sistema de detecção de moedas em tempo real utiliza
 ## 🔧 Estrutura do Projeto
 
 ```
-.
-├── src/
-│   ├── main.cpp
-│   ├── coin_detector.cpp
-│   └── coin_detector.h
-└── README.md
+Visao_tp/
+│
+├── vc.h                      # Header com funções de processamento de imagem
+├── vc.cpp                    # Implementação das funções de processamento
+├── main.cpp                  # Ponto de entrada da aplicação
+│
+├── Visao_tp.sln             # Solução do Visual Studio
+├── Visao_tp.vcxproj         # Arquivo de projeto do Visual Studio
+├── Visao_tp.vcxproj.filters # Filtros do projeto
+│
+├── .vscode/                  # Configurações do VS Code (se utilizado)
+│   └── c_cpp_properties.json # Configurações do IntelliSense
+│
+└── x64/                      # Arquivos de build (ignorados no git)
 ```
 
 ## ⚙️ Parâmetros Configuráveis
@@ -51,12 +59,4 @@ O sistema permite ajustar vários parâmetros para otimizar a detecção:
 - Intervalos HSV para segmentação de cor
 - Parâmetros da Transformada de Hough
 - Limiares de área para filtrar moedas
-- Parâmetros do detector de bordas Canny
-
-## 📝 Licença
-
-Este projeto está sob a licença MIT.
-
-## ✉️ Contacto
-
-Para questões ou sugestões, por favor abra uma issue no repositório. 
+- Parâmetros do detector de bordas Canny 
