@@ -1,0 +1,1 @@
+.\Visao_tp.exe C:\Users\Utilizador\Desktop\Visao_tp\VC-PL-TP\video1.mp4

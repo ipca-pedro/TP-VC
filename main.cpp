@@ -1,6 +1,6 @@
 ﻿/**
  * @file main.c
- * @brief Programa para contar moedas em um v�deo
+ * @brief Programa para contar moedas em um video
  * @author [Seu Nome]
  * @date 2024
  */
@@ -15,11 +15,16 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Processa o v�deo
+    printf("Iniciando processamento de video...\n");
+    printf("Pressione 'ESC' para sair\n");
+    printf("Use as trackbars para ajustar os parâmetros de detecção\n");
+
+    // Processa o video
     if (!vc_process_video(argv[1])) {
-        printf("Erro ao processar o v�deo\n");
+        printf("Erro ao processar o video\n");
         return 1;
     }
 
+    printf("Processamento finalizado com sucesso\n");
     return 0;
 }

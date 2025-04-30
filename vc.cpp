@@ -458,37 +458,98 @@ int vc_process_video(const char* filename) {
     cv::Mat cv_frame;
     int frame_count = 0;
 
+    // Criar janelas e trackbars
+    cv::namedWindow("Controls", cv::WINDOW_AUTOSIZE);
+    cv::namedWindow("Original", cv::WINDOW_AUTOSIZE);
+    cv::namedWindow("HSV", cv::WINDOW_AUTOSIZE);
+    cv::namedWindow("Binary", cv::WINDOW_AUTOSIZE);
+
     while (cap.read(cv_frame)) {
         frame_count++;
 
         // Converte frame OpenCV para nossa estrutura IVC
         memcpy(frame->data, cv_frame.data, width * height * 3);
 
-        // Processa o frame
-        vc_rgb_to_hsv(frame, hsv);
+        // Converte para HSV usando apenas cvtColor
+        cv::Mat cv_hsv;
+        cv::cvtColor(cv_frame, cv_hsv, cv::COLOR_BGR2HSV);
+        memcpy(hsv->data, cv_hsv.data, width * height * 3);
         
+        // Valores HSV ajustados para cada tipo de moeda
+        // Moedas de cobre (1, 2, 5 cents) - tons marrom/cobre
+        int hmin_copper = 10, hmax_copper = 40;    // Faixa para tons marrom/cobre
+        int smin_copper = 80, smax_copper = 255;   // Alta saturação
+        int vmin_copper = 50, vmax_copper = 220;   // Brilho médio-alto
+
+        // Moedas douradas (10, 20, 50 cents) - tons amarelo/dourado
+        int hmin_gold = 20, hmax_gold = 45;        // Faixa para tons dourados
+        int smin_gold = 100, smax_gold = 255;      // Alta saturação
+        int vmin_gold = 100, vmax_gold = 255;      // Alto brilho
+
+        // Moedas prateadas (1, 2 euros) - tons cinza/prata
+        int hmin_silver = 0, hmax_silver = 180;    // Qualquer matiz
+        int smin_silver = 0, smax_silver = 70;     // Baixa saturação
+        int vmin_silver = 150, vmax_silver = 255;  // Alto brilho
+
         // Cria uma cópia do frame binário para cada tipo de metal
         IVC* binary_copper = vc_image_new(width, height, 1, 255);
         IVC* binary_gold = vc_image_new(width, height, 1, 255);
         IVC* binary_silver = vc_image_new(width, height, 1, 255);
         
-        // Detecta moedas de cobre (1, 2, 5 cents)
-        vc_hsv_segmentation(hsv, binary_copper, 10, 20, 100, 255, 50, 200);
+        // Detecta cada tipo de moeda
+        vc_hsv_segmentation(hsv, binary_copper, 
+            hmin_copper, hmax_copper, 
+            smin_copper, smax_copper, 
+            vmin_copper, vmax_copper);
         
-        // Detecta moedas douradas (10, 20, 50 cents)
-        vc_hsv_segmentation(hsv, binary_gold, 20, 30, 150, 255, 100, 255);
+        vc_hsv_segmentation(hsv, binary_gold,
+            hmin_gold, hmax_gold,
+            smin_gold, smax_gold,
+            vmin_gold, vmax_gold);
         
-        // Detecta partes prateadas (1, 2 euros)
-        vc_hsv_segmentation(hsv, binary_silver, 0, 180, 0, 50, 200, 255);
+        vc_hsv_segmentation(hsv, binary_silver,
+            hmin_silver, hmax_silver,
+            smin_silver, smax_silver,
+            vmin_silver, vmax_silver);
         
-        // Combina os resultados no binary final
+        // Aplica operações morfológicas para remover ruído
+        // Primeiro erosão para remover pequenos ruídos
+        vc_binary_erode(binary_copper, binary_copper, 5);  // Aumentei kernel para 5x5
+        vc_binary_erode(binary_gold, binary_gold, 5);
+        vc_binary_erode(binary_silver, binary_silver, 5);
+        
+        // Depois dilatação para recuperar o formato
+        vc_binary_dilate(binary_copper, binary_copper, 7); // Aumentei kernel para 7x7
+        vc_binary_dilate(binary_gold, binary_gold, 7);
+        vc_binary_dilate(binary_silver, binary_silver, 7);
+        
+        // Erosão final para refinar as bordas
+        vc_binary_erode(binary_copper, binary_copper, 3);
+        vc_binary_erode(binary_gold, binary_gold, 3);
+        vc_binary_erode(binary_silver, binary_silver, 3);
+        
+        // Combina os resultados no binary final com prioridade
         unsigned char* data_copper = (unsigned char*)binary_copper->data;
         unsigned char* data_gold = (unsigned char*)binary_gold->data;
         unsigned char* data_silver = (unsigned char*)binary_silver->data;
         unsigned char* data_binary = (unsigned char*)binary->data;
         
         for(int i = 0; i < width * height; i++) {
-            data_binary[i] = (data_copper[i] == 255 || data_gold[i] == 255 || data_silver[i] == 255) ? 255 : 0;
+            // Prioriza detecção de moedas prateadas
+            if (data_silver[i] == 255) {
+                data_binary[i] = 255;
+            }
+            // Depois moedas douradas
+            else if (data_gold[i] == 255) {
+                data_binary[i] = 255;
+            }
+            // Por fim moedas de cobre
+            else if (data_copper[i] == 255) {
+                data_binary[i] = 255;
+            }
+            else {
+                data_binary[i] = 0;
+            }
         }
 
         // Limpa o buffer de rastreamento a cada 30 frames
@@ -523,8 +584,8 @@ int vc_process_video(const char* filename) {
         const float AREA_1EURO = PI * pow(DIAM_1EURO * MM_TO_PIXELS / 2, 2);
         const float AREA_2EURO = PI * pow(DIAM_2EURO * MM_TO_PIXELS / 2, 2);
 
-        // Margem de erro para área (±15%)
-        const float AREA_MARGIN = 0.15f;
+        // Margem de erro para área (±25%)
+        const float AREA_MARGIN = 0.25f;
 
         // Para cada objeto detectado
         for (int i = 1; i <= num_objects; i++) {
@@ -553,7 +614,7 @@ int vc_process_video(const char* filename) {
                 int center_x = sum_x / area;
                 int center_y = sum_y / area;
 
-                // Calcula perímetro e circularidade
+                // Calcula perímetro
                 for (int y = min_y; y <= max_y; y++) {
                     for (int x = min_x; x <= max_x; x++) {
                         if (labels[y * width + x] == i) {
@@ -570,71 +631,80 @@ int vc_process_video(const char* filename) {
 
                 float circularity = (4.0f * PI * area) / (perimeter * perimeter);
 
-                // Debug: mostra todas as áreas detectadas
-                printf("Objeto detectado: Area=%d, Circ=%.2f\n", area, circularity);
-
-                // Verifica se é uma moeda válida (circularidade > 0.7)
-                if (circularity > 0.7) {
-                    int coin_type = -1;
-                    const char* coin_label = "";
+                // Verifica se é uma moeda válida usando múltiplos critérios
+                if (circularity > 0.65) {
+                    // Calcula a razão de aspecto (width/height da bounding box)
+                    float aspect_ratio = (float)(max_x - min_x) / (float)(max_y - min_y);
                     
-                    // Identifica o tipo de moeda baseado na área com margem de erro
-                    if (area >= AREA_1CENT * (1 - AREA_MARGIN) && area <= AREA_1CENT * (1 + AREA_MARGIN)) 
-                        { coin_type = 0; coin_label = "1c"; }
-                    else if (area >= AREA_2CENT * (1 - AREA_MARGIN) && area <= AREA_2CENT * (1 + AREA_MARGIN))
-                        { coin_type = 1; coin_label = "2c"; }
-                    else if (area >= AREA_5CENT * (1 - AREA_MARGIN) && area <= AREA_5CENT * (1 + AREA_MARGIN))
-                        { coin_type = 2; coin_label = "5c"; }
-                    else if (area >= AREA_10CENT * (1 - AREA_MARGIN) && area <= AREA_10CENT * (1 + AREA_MARGIN))
-                        { coin_type = 3; coin_label = "10c"; }
-                    else if (area >= AREA_20CENT * (1 - AREA_MARGIN) && area <= AREA_20CENT * (1 + AREA_MARGIN))
-                        { coin_type = 4; coin_label = "20c"; }
-                    else if (area >= AREA_50CENT * (1 - AREA_MARGIN) && area <= AREA_50CENT * (1 + AREA_MARGIN))
-                        { coin_type = 5; coin_label = "50c"; }
-                    else if (area >= AREA_1EURO * (1 - AREA_MARGIN) && area <= AREA_1EURO * (1 + AREA_MARGIN))
-                        { coin_type = 6; coin_label = "1€"; }
-                    else if (area >= AREA_2EURO * (1 - AREA_MARGIN) && area <= AREA_2EURO * (1 + AREA_MARGIN))
-                        { coin_type = 7; coin_label = "2€"; }
-
-                    // Se identificou uma moeda válida
-                    if (coin_type >= 0) {
-                        // Verifica se esta moeda já foi contada
-                        bool already_counted = false;
-                        for (const auto& tracked : tracked_coins) {
-                            int dx = center_x - tracked.center_x;
-                            int dy = center_y - tracked.center_y;
-                            float distance = sqrt(dx*dx + dy*dy);
+                    // Moedas devem ser aproximadamente circulares (razão próxima de 1.0)
+                    if (aspect_ratio >= 0.85 && aspect_ratio <= 1.15) {
+                        // Calcula a densidade (área preenchida / área da bounding box)
+                        float bbox_area = (max_x - min_x + 1) * (max_y - min_y + 1);
+                        float density = area / bbox_area;
+                        
+                        // Moedas devem ter alta densidade (área preenchida)
+                        if (density > 0.6) {
+                            int coin_type = -1;
+                            const char* coin_label = "";
                             
-                            if (distance < 30) {
-                                already_counted = true;
-                                break;
+                            // Identifica o tipo de moeda baseado na área com margem de erro
+                            if (area >= AREA_1CENT * (1 - AREA_MARGIN) && area <= AREA_1CENT * (1 + AREA_MARGIN)) 
+                                { coin_type = 0; coin_label = "1c"; }
+                            else if (area >= AREA_2CENT * (1 - AREA_MARGIN) && area <= AREA_2CENT * (1 + AREA_MARGIN))
+                                { coin_type = 1; coin_label = "2c"; }
+                            else if (area >= AREA_5CENT * (1 - AREA_MARGIN) && area <= AREA_5CENT * (1 + AREA_MARGIN))
+                                { coin_type = 2; coin_label = "5c"; }
+                            else if (area >= AREA_10CENT * (1 - AREA_MARGIN) && area <= AREA_10CENT * (1 + AREA_MARGIN))
+                                { coin_type = 3; coin_label = "10c"; }
+                            else if (area >= AREA_20CENT * (1 - AREA_MARGIN) && area <= AREA_20CENT * (1 + AREA_MARGIN))
+                                { coin_type = 4; coin_label = "20c"; }
+                            else if (area >= AREA_50CENT * (1 - AREA_MARGIN) && area <= AREA_50CENT * (1 + AREA_MARGIN))
+                                { coin_type = 5; coin_label = "50c"; }
+                            else if (area >= AREA_1EURO * (1 - AREA_MARGIN) && area <= AREA_1EURO * (1 + AREA_MARGIN))
+                                { coin_type = 6; coin_label = "1€"; }
+                            else if (area >= AREA_2EURO * (1 - AREA_MARGIN) && area <= AREA_2EURO * (1 + AREA_MARGIN))
+                                { coin_type = 7; coin_label = "2€"; }
+
+                            // Se identificou uma moeda válida
+                            if (coin_type >= 0) {
+                                // Verifica se esta moeda já foi contada
+                                bool already_counted = false;
+                                for (const auto& tracked : tracked_coins) {
+                                    int dx = center_x - tracked.center_x;
+                                    int dy = center_y - tracked.center_y;
+                                    float distance = sqrt(dx*dx + dy*dy);
+                                    
+                                    if (distance < 30) {
+                                        already_counted = true;
+                                        break;
+                                    }
+                                }
+
+                                if (!already_counted) {
+                                    // Adiciona nova moeda ao rastreamento
+                                    CoinTracker new_coin = {center_x, center_y, coin_type, 0};
+                                    tracked_coins.push_back(new_coin);
+                                    
+                                    // Atualiza estatísticas
+                                    stats.total_coins++;
+                                    stats.coins_by_type[coin_type]++;
+
+                                    // Debug: mostra informação da moeda detectada
+                                    printf("Moeda detectada: %s, Area=%d, Circ=%.2f, Pos=(%d,%d)\n", 
+                                           coin_label, area, circularity, center_x, center_y);
+                                }
                             }
-                        }
-
-                        if (!already_counted) {
-                            // Adiciona nova moeda ao rastreamento
-                            CoinTracker new_coin = {center_x, center_y, coin_type, 0};
-                            tracked_coins.push_back(new_coin);
-                            
-                            // Atualiza estatísticas
-                            stats.total_coins++;
-                            stats.coins_by_type[coin_type]++;
-
-                            // Desenha informações da moeda no frame
-                            char info[100];
-                            sprintf(info, "%s (%.2f)", coin_label, circularity);
-                            cv::putText(cv_frame, info, cv::Point(center_x - 20, center_y), 
-                                      cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
-                            cv::circle(cv_frame, cv::Point(center_x, center_y), 3, cv::Scalar(0, 255, 0), -1);
-
-                            // Debug: mostra informação da moeda detectada
-                            printf("Moeda detectada: %s, Area=%d, Circ=%.2f, Pos=(%d,%d)\n", 
-                                   coin_label, area, circularity, center_x, center_y);
                         }
                     }
                 }
             }
         }
+
+        // Mostrar etapas do processamento
+        cv::imshow("Original", cv_frame);
+        cv::imshow("HSV", cv_hsv);
+        cv::Mat binary_display(height, width, CV_8UC1, binary->data);
+        cv::imshow("Binary", binary_display);
 
         // Mostra estatísticas no frame
         char info[200];
@@ -681,5 +751,92 @@ int vc_process_video(const char* filename) {
     cv::destroyAllWindows();
     cap.release();
 
+    return 1;
+}
+
+// Binary morphological operations
+int vc_binary_erode(IVC* src, IVC* dst, int kernel_size) {
+    unsigned char* data_src = (unsigned char*)src->data;
+    unsigned char* data_dst = (unsigned char*)dst->data;
+    int width = src->width;
+    int height = src->height;
+    int bytesperline = src->bytesperline;
+    int channels = src->channels;
+    int x, y, kx, ky;
+    int offset = kernel_size / 2;
+
+    // Verificação de erros
+    if ((src->width <= 0) || (src->height <= 0) || (src->data == NULL)) return 0;
+    if ((src->width != dst->width) || (src->height != dst->height)) return 0;
+    if ((src->channels != 1) || (dst->channels != 1)) return 0;
+    if (kernel_size % 2 == 0) return 0;
+
+    // Copia a imagem fonte para destino
+    memcpy(data_dst, data_src, width * height);
+
+    // Para cada pixel da imagem
+    for (y = offset; y < height - offset; y++) {
+        for (x = offset; x < width - offset; x++) {
+            int pos = y * bytesperline + x;
+            bool erode = false;
+
+            // Se o pixel for branco, verifica vizinhança
+            if (data_src[pos] == 255) {
+                // Para cada pixel do kernel
+                for (ky = -offset; ky <= offset && !erode; ky++) {
+                    for (kx = -offset; kx <= offset && !erode; kx++) {
+                        int pos_k = (y + ky) * bytesperline + (x + kx);
+                        if (data_src[pos_k] == 0) {
+                            erode = true;
+                        }
+                    }
+                }
+                if (erode) data_dst[pos] = 0;
+            }
+        }
+    }
+    return 1;
+}
+
+int vc_binary_dilate(IVC* src, IVC* dst, int kernel_size) {
+    unsigned char* data_src = (unsigned char*)src->data;
+    unsigned char* data_dst = (unsigned char*)dst->data;
+    int width = src->width;
+    int height = src->height;
+    int bytesperline = src->bytesperline;
+    int channels = src->channels;
+    int x, y, kx, ky;
+    int offset = kernel_size / 2;
+
+    // Verificação de erros
+    if ((src->width <= 0) || (src->height <= 0) || (src->data == NULL)) return 0;
+    if ((src->width != dst->width) || (src->height != dst->height)) return 0;
+    if ((src->channels != 1) || (dst->channels != 1)) return 0;
+    if (kernel_size % 2 == 0) return 0;
+
+    // Copia a imagem fonte para destino
+    memcpy(data_dst, data_src, width * height);
+
+    // Para cada pixel da imagem
+    for (y = offset; y < height - offset; y++) {
+        for (x = offset; x < width - offset; x++) {
+            int pos = y * bytesperline + x;
+            bool dilate = false;
+
+            // Se o pixel for preto, verifica vizinhança
+            if (data_src[pos] == 0) {
+                // Para cada pixel do kernel
+                for (ky = -offset; ky <= offset && !dilate; ky++) {
+                    for (kx = -offset; kx <= offset && !dilate; kx++) {
+                        int pos_k = (y + ky) * bytesperline + (x + kx);
+                        if (data_src[pos_k] == 255) {
+                            dilate = true;
+                        }
+                    }
+                }
+                if (dilate) data_dst[pos] = 255;
+            }
+        }
+    }
     return 1;
 }
